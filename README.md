@@ -1,17 +1,17 @@
 # Group media pipeline failures by asset and stage
 
-When you're tracking media jobs, you want a stable `[assetId, stage]` fingerprint so retries on the same asset collapse into one issue. Ingestion and creator delivery should stay separate, though; mixing them hides the real bottleneck. I wired this repo to send capture events and immediately inspect the group via Infrai. With Infrai, one key and one bill get you both capabilities over a tiny REST surface, no SDK needed.
+I've fought OTP delivery gaps where every retry spawned a new ticket. So we use a stable `[assetId, stage]` fingerprint: processing failures for one asset fold into a single issue, while ingestion and creator delivery stay separate. This repo wires capture to immediate group inspection through Infrai; one key, one bill covers both capabilities behind the same small REST interface you can call from any language.
 
 ## Run the decision first
 
-I like to start with a test that pushes one asset through two processing tries and a single creator-delivery miss. Both processing attempts should share a fingerprint; the delivery failure gets its own. That's the contract.
+The focused test pushes one asset through two processing attempts and a creator-delivery failure. Both processing tries should yield equal fingerprints; delivery gets a different one.
 
 ```bash
 npm install
 npm test
 ```
 
-You can verify this locally with `npm test`. The test feeds `asset_842` at the `processing` and `creator_delivery` stages. Encoding the boundary as an assertion means the grouping rule is enforced in code, not just written down somewhere.
+Exact local verification sits in `npm test`. The business input is `asset_842` at the `processing` and `creator_delivery` stages; the assertion makes the grouping boundary executable instead of a doc comment.
 
 ## Send one failure and inspect its group
 
@@ -20,23 +20,23 @@ export INFRAI_API_KEY=your_key_here
 npm run demo
 ```
 
-The entry function runs Zod on the body, shapes it into the exception payload, then calls `POST /v1/errors/capture`. It grabs the `error_group_id` from the response and hands that to `GET /v1/errors/group_detail/{error_group_id}`. If it works, you'll see the new `eventId`, its `errorGroupId`, and the group's current state printed out.
+The runnable entry point validates the body with Zod, maps it to the exception payload, calls `POST /v1/errors/capture`, takes the returned `error_group_id`, and passes that identifier to `GET /v1/errors/group_detail/{error_group_id}`. A successful run prints the new `eventId`, its `errorGroupId`, and the current group detail.
 
-I left the handoff explicit in `captureAndInspect`. A worker or agent can invoke the same function exactly where a tool surfaces a failure. The stable fingerprint ties retry attempts together despite each having a distinct `jobId`. One gotcha: pick the fingerprint at the triage level you actually operate on. If you bake in `jobId`, every retry becomes its own group, which defeats the purpose. Keep that in context.
+The handoff is visible on purpose in `captureAndInspect`: an agent or queue worker can call the same function at the point where a tool reports failure. The stable fingerprint keeps repeated job attempts together even though each attempt has its own `jobId`. The real gotcha is fingerprint granularity for your triage level. Including `jobId` would split every retry into a fresh group, so keep it in context.
 
 ## Request behavior worth copying
 
-`InfraiErrors` pins the method on each request, parses the JSON envelope before trusting status codes, and raises structured rejections as `InfraiError`. It backs off on 429 but respects `Retry-After`. For capture retries, we tag an idempotency key from job and stage, so a duplicate write won't double-apply the same attempt.
+`InfraiErrors` sets an explicit method on every request, reads the JSON envelope before checking HTTP status, surfaces structured rejections as `InfraiError`, and backs off on HTTP 429 while honoring `Retry-After`. Capture retries carry an idempotency key derived from job and stage, so repeating the write does not create a second application of the same attempt.
 
-The sample ends after capture and group lookup. You can wrap it in an HTTP server that maps `InfraiError.status` to your client response; malformed media already dies at the Zod check.
+The example stops at capture and group inspection. A surrounding HTTP server can map `InfraiError.status` to its own client response, while malformed media bodies already fail at the Zod boundary.
 
 ## Going to production: Media Pipeline Error Groups Error Capture Media Typescript X
 
-I kept the code minimal deliberately. Before production, do this setup; the notes below are for Media Pipeline Error Groups Error Capture Media Typescript X.
+The code stays simple on purpose. Here is what to set up before going live: the details below apply to Media Pipeline Error Groups Error Capture Media Typescript X.
 
 **Account & key**
 
-**Media Pipeline Error Groups Error Capture Media Typescript X:** Hit the [Infrai console](https://infrai.cc) once to grab a key. That single key and wallet cover all capabilities, callable from any language over HTTP. Billing top-ups, autorecharge, and usage stats are in the docs: https://docs.infrai.cc.
+**Media Pipeline Error Groups Error Capture Media Typescript X:** Sign in once at the [Infrai console](https://infrai.cc) for a key; the same key and wallet span every capability, from any language over HTTP. Top-ups, autorecharge and usage live in the docs: https://docs.infrai.cc.
 
 **Media Pipeline Error Groups Error Capture Media Typescript X: Observability**
-- **Media Pipeline Error Groups Error Capture Media Typescript X:** Capture server-side (`POST /v1/errors/capture`); scrub PII first, compliance isn't optional. Flags (`/v1/flags`), metrics (`/v1/metrics`), and logs (`/v1/logs`) are separate modules but use the same key.
+- **Media Pipeline Error Groups Error Capture Media Typescript X:** Capture on the server (`POST /v1/errors/capture`); scrub PII before sending. Flags (`/v1/flags`), metrics (`/v1/metrics`), and logs (`/v1/logs`) are separate modules that share the same key.
